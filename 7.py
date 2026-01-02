@@ -59,12 +59,25 @@ if "chat_session" not in st.session_state:
 if "courses" not in st.session_state: st.session_state.courses = {}
 
 # --- 2. المحرك التقني (نفس الوظائف السابقة) ---
+from selenium.webdriver.chrome.service import Service
+from webdriver_manager.chrome import ChromeDriverManager
+from webdriver_manager.core.os_manager import ChromeType
+
 def run_selenium_task(username, password, task_type="timeline", course_url=None):
     options = Options()
-    options.add_argument('--ignore-certificate-errors')
-    options.add_argument('--start-maximized')
-    driver = webdriver.Chrome(options=options)
+    # إعدادات التشغيل على السيرفر (ضرورية جداً)
+    options.add_argument("--headless")  # تشغيل بدون شاشة
+    options.add_argument("--no-sandbox") # للأمان داخل السيرفر
+    options.add_argument("--disable-dev-shm-usage") # لتجنب مشاكل الذاكرة
+    options.add_argument("--disable-gpu")
+    
+    # تحديد مسار الكروم في سيرفرات ستريم ليت
+    options.binary_location = "/usr/bin/chromium"
     try:
+        # استخدام الخدمة الافتراضية للينكس
+        service = Service("/usr/bin/chromedriver")
+        driver = webdriver.Chrome(service=service, options=options)
+        
         driver.get("https://sso.iugaza.edu.ps/saml/module.php/core/loginuserpass")
         time.sleep(3)
         if "sso.iugaza" in driver.current_url:
@@ -152,4 +165,5 @@ with tab3:
         with st.chat_message("user"): st.markdown(chat_input)
         context = st.session_state.get("timeline_data", "")
         response = st.session_state.chat_session.send_message(f"Context: {context}\n\nUser: {chat_input}")
+
         with st.chat_message("assistant"): st.markdown(response.text)
