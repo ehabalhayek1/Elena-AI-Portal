@@ -36,7 +36,6 @@ st.markdown("""
     """, unsafe_allow_html=True)
 
 # --- 2. إعداد Groq Cloud ---
-# ملاحظة: تأكد من وضع الـ API Key الخاص بـ Groq هنا
 GROQ_API_KEY = "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"
 client = Groq(api_key=GROQ_API_KEY)
 
@@ -46,20 +45,27 @@ if "chat_history" not in st.session_state:
 if "courses" not in st.session_state: 
     st.session_state.courses = {}
 
+# دالة ذكية لتنظيف وتقليص النص لتجنب خطأ BadRequest
 def ask_elena_groq(user_prompt, context=""):
-    system_msg = "You are Elena, a genius academic assistant. Analyze the university portal data provided. Be concise, professional, and answer in English."
-    full_prompt = f"Context from Portal: {context}\n\nUser Question: {user_prompt}"
+    # تنظيف النص: نأخذ أول 7000 حرف فقط لتجنب تجاوز حد الـ Tokens
+    cleaned_context = str(context)[:7000] 
     
-    completion = client.chat.completions.create(
-        model="llama3-70b-8192",
-        messages=[
-            {"role": "system", "content": system_msg},
-            {"role": "user", "content": full_prompt}
-        ],
-        temperature=0.5,
-        max_tokens=2048
-    )
-    return completion.choices[0].message.content
+    system_msg = "You are Elena, a genius academic assistant. Analyze the university portal data provided. Be concise, professional, and answer in English."
+    full_prompt = f"Context from Portal: {cleaned_context}\n\nUser Question: {user_prompt}"
+    
+    try:
+        completion = client.chat.completions.create(
+            model="llama3-70b-8192",
+            messages=[
+                {"role": "system", "content": system_msg},
+                {"role": "user", "content": full_prompt}
+            ],
+            temperature=0.5,
+            max_tokens=1024
+        )
+        return completion.choices[0].message.content
+    except Exception as e:
+        return f"AI Error: The text might be too large or there is a connection issue. Details: {str(e)}"
 
 # --- 3. المحرك التقني (Selenium) ---
 def run_selenium_task(username, password, task_type="timeline", course_url=None):
@@ -83,7 +89,7 @@ def run_selenium_task(username, password, task_type="timeline", course_url=None)
         
         time.sleep(7)
         if task_type == "timeline":
-            time.sleep(80) 
+            time.sleep(50) 
             body_text = driver.find_element(By.TAG_NAME, "body").text
             course_elements = driver.find_elements(By.CSS_SELECTOR, "a[href*='course/view.php?id=']")
             courses = {el.text: el.get_attribute("href") for el in course_elements if len(el.text) > 5}
