@@ -56,7 +56,7 @@ def ask_elena_groq(user_prompt, context=""):
     
     try:
         completion = client.chat.completions.create(
-            model="llama3-8b-8192", # استخدمت موديل 8b لأنه أخف وأسرع للطلبات المتكررة
+           model="llama-3.1-8b-instant", # استخدمت موديل 8b لأنه أخف وأسرع للطلبات المتكررة
             messages=[
                 {"role": "system", "content": "You are Elena, a professional academic assistant. Use the provided portal context to answer concisely in English."},
                 {"role": "user", "content": f"Context: {cleaned_context}\n\nQuestion: {user_prompt}"}
@@ -158,3 +158,4 @@ with tab3:
         
         st.session_state.chat_history.append({"role": "assistant", "content": reply})
         with st.chat_message("assistant"): st.markdown(reply)
+
