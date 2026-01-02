@@ -6,8 +6,7 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.chrome.service import Service
 import time
-import pandas as pd
-import json
+import re
 
 # --- 1. إعدادات الصفحة والتصميم ---
 st.set_page_config(page_title="Elena AI | Smart Student Portal", page_icon="🎓", layout="wide")
@@ -41,31 +40,33 @@ client = Groq(api_key=GROQ_API_KEY)
 
 if "chat_history" not in st.session_state:
     st.session_state.chat_history = []
-
 if "courses" not in st.session_state: 
     st.session_state.courses = {}
 
-# دالة ذكية لتنظيف وتقليص النص لتجنب خطأ BadRequest
+# دالة تنظيف النص الجذري (تنظيف المسافات والرموز الزائدة)
+def clean_text_optimized(text):
+    if not text: return ""
+    # إزالة الفراغات المتكررة والأسطر الفارغة
+    text = re.sub(r'\s+', ' ', text)
+    # أخذ قدر كافٍ للتحليل دون إرهاق الـ API (حوالي 4000 حرف صافي)
+    return text[:4000]
+
 def ask_elena_groq(user_prompt, context=""):
-    # تنظيف النص: نأخذ أول 7000 حرف فقط لتجنب تجاوز حد الـ Tokens
-    cleaned_context = str(context)[:7000] 
-    
-    system_msg = "You are Elena, a genius academic assistant. Analyze the university portal data provided. Be concise, professional, and answer in English."
-    full_prompt = f"Context from Portal: {cleaned_context}\n\nUser Question: {user_prompt}"
+    cleaned_context = clean_text_optimized(context)
     
     try:
         completion = client.chat.completions.create(
-            model="llama3-70b-8192",
+            model="llama3-8b-8192", # استخدمت موديل 8b لأنه أخف وأسرع للطلبات المتكررة
             messages=[
-                {"role": "system", "content": system_msg},
-                {"role": "user", "content": full_prompt}
+                {"role": "system", "content": "You are Elena, a professional academic assistant. Use the provided portal context to answer concisely in English."},
+                {"role": "user", "content": f"Context: {cleaned_context}\n\nQuestion: {user_prompt}"}
             ],
-            temperature=0.5,
-            max_tokens=1024
+            temperature=0.3,
+            max_tokens=800
         )
         return completion.choices[0].message.content
     except Exception as e:
-        return f"AI Error: The text might be too large or there is a connection issue. Details: {str(e)}"
+        return f"⚠️ Error with AI: {str(e)}"
 
 # --- 3. المحرك التقني (Selenium) ---
 def run_selenium_task(username, password, task_type="timeline", course_url=None):
@@ -73,7 +74,6 @@ def run_selenium_task(username, password, task_type="timeline", course_url=None)
     options.add_argument("--headless")
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
-    options.add_argument("--disable-gpu")
     options.binary_location = "/usr/bin/chromium"
     
     try:
@@ -82,17 +82,17 @@ def run_selenium_task(username, password, task_type="timeline", course_url=None)
         
         driver.get("https://sso.iugaza.edu.ps/saml/module.php/core/loginuserpass")
         time.sleep(3)
-        if "sso.iugaza" in driver.current_url:
+        if "username" in driver.page_source:
             driver.find_element(By.ID, "username").send_keys(username)
             driver.find_element(By.ID, "password").send_keys(password)
             driver.find_element(By.ID, "password").send_keys(Keys.ENTER)
         
-        time.sleep(7)
+        time.sleep(10)
         if task_type == "timeline":
-            time.sleep(50) 
+            time.sleep(70) 
             body_text = driver.find_element(By.TAG_NAME, "body").text
             course_elements = driver.find_elements(By.CSS_SELECTOR, "a[href*='course/view.php?id=']")
-            courses = {el.text: el.get_attribute("href") for el in course_elements if len(el.text) > 5}
+            courses = {el.text: el.get_attribute("href") for el in course_elements if len(el.text) > 3}
             return {"text": body_text, "courses": courses}
         elif task_type == "course_deep_dive":
             driver.get(course_url)
@@ -113,59 +113,48 @@ with col_title:
 with st.sidebar:
     st.markdown("<br><h2 style='text-align:center; color:white;'>🔒 Access Portal</h2>", unsafe_allow_html=True)
     u_id = st.text_input("Student ID", placeholder="120XXXXXX")
-    u_pass = st.text_input("Password", type="password", placeholder="••••••••")
+    u_pass = st.text_input("Password", type="password")
     
-    st.markdown("---")
     if st.button("🚀 Sync My Data"):
-        with st.spinner("Logging into IUG Moodle..."):
+        with st.spinner("Elena is accessing Moodle..."):
             result = run_selenium_task(u_id, u_pass, "timeline")
-            if "error" in result: 
-                st.error("Login Failed")
+            if "error" in result: st.error("Sync Failed. Check credentials.")
             else:
                 st.session_state.timeline_data = result['text']
                 st.session_state.courses = result['courses']
                 st.balloons()
 
-tab1, tab2, tab3 = st.tabs(["📅 Daily Timeline", "🔍 Course Navigator", "💬 Ask Elena"])
+tab1, tab2, tab3 = st.tabs(["📅 Timeline", "📚 Courses", "💬 Chat"])
 
 with tab1:
-    st.markdown("### 📋 Upcoming Deadlines & Events")
     if "timeline_data" in st.session_state:
-        if st.button("✨ Smart Analysis"):
-            with st.spinner("Elena is analyzing your timeline via Groq..."):
-                analysis = ask_elena_groq("Summarize upcoming tasks and deadlines from this text", st.session_state.timeline_data)
-                st.markdown(f"<div class='course-card'>{analysis}</div>", unsafe_allow_html=True)
-    else:
-        st.warning("Please login and sync your data to view the timeline.")
+        if st.button("✨ Analyze Deadlines"):
+            with st.spinner("Processing..."):
+                ans = ask_elena_groq("Identify only specific upcoming tasks and dates.", st.session_state.timeline_data)
+                st.markdown(f"<div class='course-card'>{ans}</div>", unsafe_allow_html=True)
+    else: st.info("Sync data first.")
 
 with tab2:
-    st.markdown("### 📚 Your Registered Courses")
-    if st.session_state.courses:
-        selected_course = st.selectbox("Choose a subject to analyze:", list(st.session_state.courses.keys()))
-        if st.button(f"📘 Deep Analysis for {selected_course}"):
-            with st.spinner(f"Diving deep into {selected_course}..."):
-                course_url = st.session_state.courses[selected_course]
-                result = run_selenium_task(u_id, u_pass, "course_deep_dive", course_url)
-                if "text" in result:
-                    summary = ask_elena_groq(f"Extract core topics and notes from this course: {selected_course}", result['text'])
-                    st.markdown(f"<div class='course-card'><h4>Summary for {selected_course}</h4><p>{summary}</p></div>", unsafe_allow_html=True)
-    else:
-        st.info("No courses found yet.")
+    if st.session_state.get("courses"):
+        sel = st.selectbox("Select Course:", list(st.session_state.courses.keys()))
+        if st.button(f"Analyze {sel}"):
+            with st.spinner("Diving deep..."):
+                res = run_selenium_task(u_id, u_pass, "course_deep_dive", st.session_state.courses[sel])
+                if "text" in res:
+                    sum_ans = ask_elena_groq(f"Summarize lectures for {sel}", res['text'])
+                    st.markdown(f"<div class='course-card'>{sum_ans}</div>", unsafe_allow_html=True)
+    else: st.info("Sync data first.")
 
 with tab3:
-    st.markdown("### 💬 AI Tutoring & Support")
-    for chat in st.session_state.chat_history:
-        with st.chat_message(chat["role"]):
-            st.markdown(chat["content"])
+    for c in st.session_state.chat_history:
+        with st.chat_message(c["role"]): st.markdown(c["content"])
 
-    if chat_input := st.chat_input("How can I help you today?"):
-        st.session_state.chat_history.append({"role": "user", "content": chat_input})
-        with st.chat_message("user"):
-            st.markdown(chat_input)
+    if prompt := st.chat_input("Ask anything..."):
+        st.session_state.chat_history.append({"role": "user", "content": prompt})
+        with st.chat_message("user"): st.markdown(prompt)
         
-        context = st.session_state.get("timeline_data", "No context available.")
-        response = ask_elena_groq(chat_input, context)
+        ctx = st.session_state.get("timeline_data", "")
+        reply = ask_elena_groq(prompt, ctx)
         
-        st.session_state.chat_history.append({"role": "assistant", "content": response})
-        with st.chat_message("assistant"):
-            st.markdown(response)
+        st.session_state.chat_history.append({"role": "assistant", "content": reply})
+        with st.chat_message("assistant"): st.markdown(reply)
